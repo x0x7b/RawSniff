@@ -16,17 +16,6 @@ import (
 var packetsView *tview.TextView
 var ifcname string
 
-const (
-	ProtoTCP  = 1 << 0
-	ProtoUDP  = 1 << 1
-	ProtoICMP = 1 << 2
-	Port80    = 1 << 3
-	Port443   = 1 << 4
-	Local     = 1 << 5
-	Inbound   = 1 << 6
-	Outbound  = 1 << 7
-)
-
 func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.TextView, filterChan chan string, statusView *tview.TextView) {
 	go func() {
 		for newFilter := range filterChan {
