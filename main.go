@@ -197,7 +197,7 @@ func main() {
 	devView.SetDynamicColors(true)
 	devView.SetTextAlign(tview.AlignCenter)
 	devView.SetBorder(true)
-	aboutText := `[white]RawSniff v1.1
+	aboutText := `[white]RawSniff v1.10
 
 [gray]Author: [yellow]0x7b
 
