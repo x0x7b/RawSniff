@@ -16,7 +16,6 @@ import (
 
 var packetsView *tview.TextView
 var ifcname string
-var helpText string
 var payloads bool
 var paused bool
 
@@ -148,10 +147,6 @@ func main() {
 	tview.Styles.BorderColor = tcell.ColorGray
 	tview.Styles.TitleColor = tcell.ColorGray
 
-	helpText = `Aviable commands:
-		-show-payloads
-		-hide-payloads(default)
-		also u can use BPF filters`
 	filterChan := make(chan string, 10)
 	app := tview.NewApplication()
 	packetsView = tview.NewTextView().
