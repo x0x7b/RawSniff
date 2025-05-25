@@ -26,27 +26,33 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 			err := handle.SetBPFFilter(newFilter)
 			if err != nil {
 				app.QueueUpdateDraw(func() {
-					statusView.Write([]byte(fmt.Sprintf("[red]Error setting filter: %v\n", err)))
+					h, m, s := time.Now().Clock()
+					statusView.Write([]byte(fmt.Sprintf("[%v:%v:%v] [red] ERROR [white]↓\nError setting filter: %v\n", h, m, s, err)))
+					statusView.ScrollToEnd()
+
 				})
 			} else {
 				app.QueueUpdateDraw(func() {
-					statusView.Write([]byte(fmt.Sprintf("[green]Filter applied: %v\n", newFilter)))
+					h, m, s := time.Now().Clock()
+					statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nFilter applied: %v\n", h, m, s, newFilter)))
 					packetsView.SetText("")
+					statusView.ScrollToEnd()
 				})
 			}
 		}
 
 	}()
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	if !paused {
-		for packet := range packetSource.Packets() {
+
+	for packet := range packetSource.Packets() {
+		if !paused {
 			if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip, _ := ipLayer.(*layers.IPv4)
 				switch ip.Protocol {
 				case layers.IPProtocolTCP:
 					tcp, _ := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
 					info := fmt.Sprintf(
-						"[lime]%-6s [green]%s:%d -> %s:%d\n[purple]TCP Flags: SYN=%t ACK=%t FIN=%t RST=%t\nSeq: %d Ack: %d Window: %d\nCheckSum: %d Urgent: %d\n[gray]%s\n",
+						"[lime]%-6s [green]%s:%d -> %s:%d\n[purple]TCP Flags: SYN=%t ACK=%t FIN=%t RST=%t\nSeq: %d Ack: %d Window: %d\nCheckSum: %d Urgent: %d\n[gray]%s",
 						ip.Protocol, ip.SrcIP, tcp.SrcPort, ip.DstIP, tcp.DstPort,
 						tcp.SYN, tcp.ACK, tcp.FIN, tcp.RST,
 						tcp.Seq, tcp.Ack, tcp.Window,
@@ -56,7 +62,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 					if appLayer := packet.ApplicationLayer(); appLayer != nil && payloads {
 						payload := appLayer.Payload()
 						if len(payload) > 0 {
-							info += fmt.Sprintf("[blue]Payload:\n%s\n", hex.Dump(payload))
+							info += fmt.Sprintf("[blue]Payload:\n%s", hex.Dump(payload))
 						}
 					}
 					app.QueueUpdateDraw(func() {
@@ -67,7 +73,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 				case layers.IPProtocolUDP:
 					udp, _ := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
 					info := fmt.Sprintf(
-						"[yellow]%-6s [green]%s:%d -> %s:%d\n[purple]Length: %d\nChecksum: %d\n[gray]%s\n",
+						"[yellow]%-6s [green]%s:%d -> %s:%d\n[purple]Length: %d\nChecksum: %d\n[gray]%s",
 						ip.Protocol, ip.SrcIP, udp.SrcPort, ip.DstIP, udp.DstPort,
 						udp.Length, udp.Checksum,
 						strings.Repeat("─", 88),
@@ -211,7 +217,8 @@ func main() {
 	payloadButton = tview.NewButton("Show Payloads").
 		SetSelectedFunc(func() {
 			payloads = !payloads
-			statusView.Write([]byte(fmt.Sprintf("Show payloads: %v\n", payloads)))
+			h, m, s := time.Now().Clock()
+			statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nShow payloads: %v\n", h, m, s, payloads)))
 			if payloads {
 				payloadButton.SetLabel("Hide Payloads")
 			} else {
@@ -239,9 +246,15 @@ func main() {
 		SetSelectedFunc(func() {
 			paused = !paused
 			if paused {
-				statusView.Write([]byte("Output paused\n"))
+				h, m, s := time.Now().Clock()
+				statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nOutput paused\n", h, m, s)))
+				packetsView.Write([]byte("Output paused\n"))
+				pauseButton.SetLabel("Resume")
 			} else {
-				statusView.Write([]byte("Output resumed\n"))
+				pauseButton.SetLabel("Pause")
+				packetsView.Write([]byte("Output resumed\n"))
+				h, m, s := time.Now().Clock()
+				statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nOutput resumed\n", h, m, s)))
 			}
 		})
 
@@ -309,10 +322,15 @@ func main() {
 
 	go func() {
 		for {
-			app.QueueUpdateDraw(func() {
-				packetsView.Write([]byte("[white]Waiting for packets...\n"))
-			})
-			time.Sleep(5 * time.Second)
+			if !paused {
+				app.QueueUpdateDraw(func() {
+					packetsView.Write([]byte("[white]Waiting for packets...\n"))
+				})
+				time.Sleep(5 * time.Second)
+			} else {
+				continue
+			}
+
 		}
 	}()
 
