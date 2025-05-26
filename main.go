@@ -15,9 +15,11 @@ import (
 )
 
 var packetsView *tview.TextView
+var filterForm *tview.Form
 var ifcname string
 var payloads bool
 var paused bool
+var maxlines int = 500
 
 func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.TextView, filterChan chan string, statusView *tview.TextView) {
 	go func() {
@@ -44,19 +46,27 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for packet := range packetSource.Packets() {
+
 		if !paused {
+			lines := strings.Split(packetsView.GetText(true), "\n")
+			if len(lines) > maxlines {
+				packetsView.SetText(strings.Join(lines[len(lines)-maxlines:], "\n"))
+			}
+			_, _, width, _ := packetsView.GetRect()
+			_, _, width1, _ := filterForm.GetRect()
+			filterForm.GetFormItemByLabel("Filter").(*tview.InputField).SetFieldWidth(width1 / 2)
 			if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip, _ := ipLayer.(*layers.IPv4)
 				switch ip.Protocol {
 				case layers.IPProtocolTCP:
 					tcp, _ := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
 					info := fmt.Sprintf(
-						"[lime]%-6s [green]%s:%d -> %s:%d\n[purple]TCP Flags: SYN=%t ACK=%t FIN=%t RST=%t\nSeq: %d Ack: %d Window: %d\nCheckSum: %d Urgent: %d\n[gray]%s",
+						"\n[lime]%-6s [green]%s:%d -> %s:%d\n[purple]TCP Flags: SYN=%t ACK=%t FIN=%t RST=%t\nSeq: %d Ack: %d Window: %d\nCheckSum: %d Urgent: %d\n[gray]%s",
 						ip.Protocol, ip.SrcIP, tcp.SrcPort, ip.DstIP, tcp.DstPort,
 						tcp.SYN, tcp.ACK, tcp.FIN, tcp.RST,
 						tcp.Seq, tcp.Ack, tcp.Window,
 						tcp.Checksum, tcp.Urgent,
-						strings.Repeat("─", 88),
+						strings.Repeat("─", width-2),
 					)
 					if appLayer := packet.ApplicationLayer(); appLayer != nil && payloads {
 						payload := appLayer.Payload()
@@ -64,38 +74,29 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 							info += fmt.Sprintf("[blue]Payload:\n%s", hex.Dump(payload))
 						}
 					}
-					app.QueueUpdateDraw(func() {
-						packetsView.Write([]byte(info))
-						packetsView.ScrollToEnd()
-					})
+					writeLog(app, packetsView, info)
 
 				case layers.IPProtocolUDP:
 					udp, _ := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
 					info := fmt.Sprintf(
-						"[yellow]%-6s [green]%s:%d -> %s:%d\n[purple]Length: %d\nChecksum: %d\n[gray]%s",
+						"\n[yellow]%-6s [green]%s:%d -> %s:%d\n[purple]Length: %d\nChecksum: %d\n[gray]%s",
 						ip.Protocol, ip.SrcIP, udp.SrcPort, ip.DstIP, udp.DstPort,
 						udp.Length, udp.Checksum,
-						strings.Repeat("─", 88),
+						strings.Repeat("─", width-2),
 					)
-					app.QueueUpdateDraw(func() {
-						packetsView.Write([]byte(info))
-						packetsView.ScrollToEnd()
-					})
+					writeLog(app, packetsView, info)
+
 				case layers.IPProtocolICMPv4:
 					icmp, _ := packet.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4)
 					info := fmt.Sprintf(
-						"[red]%-6s [green]%s -> %s\nICMPv4 Type: %d Code: %d\nID: %d Seq: %d\nChecksum: %d\n[gray]%s",
+						"\n[red]%-6s [green]%s -> %s\nICMPv4 Type: %d Code: %d\nID: %d Seq: %d\nChecksum: %d\n[gray]%s",
 						ip.Protocol, ip.SrcIP, ip.DstIP,
 						icmp.TypeCode.Type(), icmp.TypeCode.Code(),
 						icmp.Id, icmp.Seq,
 						icmp.Checksum,
-						strings.Repeat("─", 88),
+						strings.Repeat("─", width-2),
 					)
-					app.QueueUpdateDraw(func() {
-						packetsView.Write([]byte(info))
-						packetsView.ScrollToEnd()
-					})
-
+					writeLog(app, packetsView, info)
 				}
 			}
 		}
@@ -106,6 +107,9 @@ func selectInterface(app *tview.Application) *pcap.Handle {
 	ifc, err := pcap.FindAllDevs()
 	if err != nil {
 		log.Fatal(err)
+	}
+	if len(ifc) == 0 {
+		log.Fatal("there is no network interfaces")
 	}
 
 	selected := make(chan int)
@@ -139,6 +143,29 @@ func selectInterface(app *tview.Application) *pcap.Handle {
 	return handle
 }
 
+func StyleButton(button *tview.Button) {
+	button.
+		SetActivatedStyle(tcell.StyleDefault.
+			Background(tcell.ColorLightGray).
+			Foreground(tcell.ColorWhite))
+
+	button.SetBackgroundColor(tcell.ColorGray)
+	button.SetBorder(true)
+	button.SetBorderColor(tcell.ColorBlack)
+
+	button.SetStyle(tcell.StyleDefault.
+		Background(tcell.ColorGray).
+		Foreground(tcell.ColorWhite))
+}
+
+func writeLog(app *tview.Application, TextView *tview.TextView, msg string) {
+	app.QueueUpdateDraw(func() {
+		TextView.Write([]byte(msg))
+		TextView.ScrollToEnd()
+	})
+
+}
+
 func main() {
 	tview.Styles.PrimitiveBackgroundColor = tcell.ColorBlack
 	tview.Styles.ContrastBackgroundColor = tcell.ColorDarkGray
@@ -156,7 +183,7 @@ func main() {
 			app.Draw()
 		})
 
-	filterForm := tview.NewForm()
+	filterForm = tview.NewForm()
 	filterForm.SetButtonBackgroundColor(tcell.ColorGray)
 	filterForm.SetButtonTextColor(tcell.ColorWhite)
 	filterForm.
@@ -176,15 +203,14 @@ func main() {
 			app.SetFocus(filterInput)
 
 		}).
-		AddButton("Quit", func() {
-			app.Stop()
-		}).
 		SetButtonsAlign(tview.AlignCenter).
 		SetBorder(true).
 		SetTitle("Console")
 	filterForm.SetFieldBackgroundColor(tcell.ColorWhite)
 	filterForm.SetFieldTextColor(tcell.ColorBlack)
 	filterForm.SetLabelColor(tcell.ColorWhite)
+	_, _, width, _ := filterForm.GetRect()
+	filterForm.GetFormItemByLabel("Filter").(*tview.InputField).SetFieldWidth(width / 2)
 
 	statusView := tview.NewTextView()
 	statusView.SetDynamicColors(true)
@@ -198,7 +224,6 @@ func main() {
 	devView.SetTextAlign(tview.AlignCenter)
 	devView.SetBorder(true)
 	aboutText := `[white]RawSniff v1.10
-
 [gray]Author: [yellow]0x7b
 
 [gray]Links:
@@ -222,18 +247,7 @@ func main() {
 			statusView.ScrollToEnd()
 		})
 
-	payloadButton.
-		SetActivatedStyle(tcell.StyleDefault.
-			Background(tcell.ColorLightGray).
-			Foreground(tcell.ColorWhite))
-
-	payloadButton.SetBackgroundColor(tcell.ColorGray)
-	payloadButton.SetBorder(true)
-	payloadButton.SetBorderColor(tcell.ColorBlack)
-
-	payloadButton.SetStyle(tcell.StyleDefault.
-		Background(tcell.ColorGray).
-		Foreground(tcell.ColorWhite))
+	StyleButton(payloadButton)
 
 	var pauseButton *tview.Button
 
@@ -253,29 +267,26 @@ func main() {
 			}
 		})
 
-	pauseButton.
-		SetActivatedStyle(tcell.StyleDefault.
-			Background(tcell.ColorLightGray).
-			Foreground(tcell.ColorWhite))
+	StyleButton(pauseButton)
 
-	pauseButton.SetBackgroundColor(tcell.ColorGray)
-	pauseButton.SetBorder(true)
-	pauseButton.SetBorderColor(tcell.ColorBlack)
-
-	pauseButton.SetStyle(tcell.StyleDefault.
-		Background(tcell.ColorGray).
-		Foreground(tcell.ColorWhite))
+	quitButton := tview.NewButton("Quit").
+		SetSelectedFunc(func() {
+			app.Stop()
+		})
+	StyleButton(quitButton)
 
 	commandsView := tview.NewFlex()
 	commandsView.SetDirection(tview.FlexRow)
 	commandsView.AddItem(payloadButton, 3, 1, true)
 	commandsView.AddItem(pauseButton, 3, 1, true)
+	commandsView.AddItem(quitButton, 3, 1, true)
+
 	commandsView.SetBorder(true)
 	commandsView.SetTitle("Commands")
 
 	rightPane := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(commandsView, 0, 1, false).
-		AddItem(devView, 0, 1, false)
+		AddItem(devView, 13, 0, false)
 
 	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(filterForm, 0, 1, true).
@@ -296,6 +307,7 @@ func main() {
 		filterForm,
 		payloadButton,
 		pauseButton,
+		quitButton,
 		packetsView,
 	}
 	currentFocus := 0
@@ -319,7 +331,7 @@ func main() {
 		for {
 			if !paused {
 				app.QueueUpdateDraw(func() {
-					packetsView.Write([]byte("[white]Waiting for packets...\n"))
+					packetsView.Write([]byte("\n[white]Waiting for packets...\n"))
 				})
 				time.Sleep(5 * time.Second)
 			} else {
