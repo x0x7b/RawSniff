@@ -1,5 +1,6 @@
 # RawSniff
-![image](https://github.com/user-attachments/assets/9a086f9a-926d-40ef-8b6a-932fab55ae28)
+![image](https://github.com/user-attachments/assets/dd01064c-7895-4de4-bfa5-af7ef197ef06)
+
 
 
 RawSniff - simple network sniffer, written on Golang with gopacket and tview
