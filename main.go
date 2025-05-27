@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/rivo/tview"
 )
 
@@ -20,10 +22,19 @@ var ifcname string
 var payloads bool
 var paused bool
 var maxlines int = 500
+var writer *pcapgo.Writer
+var write bool
+var filename string = "packets.pcap"
 
 func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.TextView, filterChan chan string, statusView *tview.TextView) {
 	go func() {
 		for newFilter := range filterChan {
+			if len(newFilter) >= 13 && newFilter[:13] == "-set-filename" {
+				filename = newFilter[14:]
+				h, m, s := time.Now().Clock()
+				statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nNew filename set: %s\n", h, m, s, filename)))
+				continue
+			}
 			err := handle.SetBPFFilter(newFilter)
 			if err != nil {
 				app.QueueUpdateDraw(func() {
@@ -41,16 +52,23 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 				})
 			}
 		}
-
 	}()
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for packet := range packetSource.Packets() {
-
 		if !paused {
+			if write {
+				writer.WritePacket(packet.Metadata().CaptureInfo, packet.Data())
+				h, m, s := time.Now().Clock()
+				writeLog(app, statusView, fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nPacket saved to file\n", h, m, s))
+			}
 			lines := strings.Split(packetsView.GetText(true), "\n")
 			if len(lines) > maxlines {
-				packetsView.SetText(strings.Join(lines[len(lines)-maxlines:], "\n"))
+				packetsView.SetText("")
+				h, m, s := time.Now().Clock()
+				statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nCleaned packets list\n", h, m, s)))
+				statusView.ScrollToEnd()
+
 			}
 			_, _, width, _ := packetsView.GetRect()
 			_, _, width1, _ := filterForm.GetRect()
@@ -68,6 +86,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 						tcp.Checksum, tcp.Urgent,
 						strings.Repeat("─", width-2),
 					)
+
 					if appLayer := packet.ApplicationLayer(); appLayer != nil && payloads {
 						payload := appLayer.Payload()
 						if len(payload) > 0 {
@@ -166,6 +185,18 @@ func writeLog(app *tview.Application, TextView *tview.TextView, msg string) {
 
 }
 
+func savePacketsToFile() *pcapgo.Writer {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pcapgoWriter := pcapgo.NewWriter(file)
+	if err := pcapgoWriter.WriteFileHeader(1600, layers.LinkTypeEthernet); err != nil {
+		log.Fatal(err)
+	}
+	return pcapgoWriter
+}
+
 func main() {
 	tview.Styles.PrimitiveBackgroundColor = tcell.ColorBlack
 	tview.Styles.ContrastBackgroundColor = tcell.ColorDarkGray
@@ -227,8 +258,8 @@ func main() {
 [gray]Author: [yellow]0x7b
 
 [gray]Links:
-[blue]GitHub: [white]https://github.com/x0x7b
-[blue]Telegram: [white]https://t.me/db0x169
+[white]https://github.com/x0x7b
+[white]https://t.me/db0x169
 
 [red::]fuck you.`
 	devView.SetText(aboutText)
@@ -275,10 +306,21 @@ func main() {
 		})
 	StyleButton(quitButton)
 
+	saveButton := tview.NewButton("Save packets").
+		SetSelectedFunc(func() {
+			write = !write
+			writer = savePacketsToFile()
+			h, m, s := time.Now().Clock()
+			statusView.Write([]byte(fmt.Sprintf("%v:%v:%v [green] INFO [white] ↓\nStarting saving packets in file %s(tip: you can set you own filename by -seti-flename filename.pcap) \n", h, m, s, filename)))
+		})
+
+	StyleButton(saveButton)
+
 	commandsView := tview.NewFlex()
 	commandsView.SetDirection(tview.FlexRow)
 	commandsView.AddItem(payloadButton, 3, 1, true)
 	commandsView.AddItem(pauseButton, 3, 1, true)
+	commandsView.AddItem(saveButton, 3, 1, true)
 	commandsView.AddItem(quitButton, 3, 1, true)
 
 	commandsView.SetBorder(true)
@@ -307,6 +349,7 @@ func main() {
 		filterForm,
 		payloadButton,
 		pauseButton,
+		saveButton,
 		quitButton,
 		packetsView,
 	}
