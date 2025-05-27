@@ -25,6 +25,8 @@ var maxlines int = 500
 var writer *pcapgo.Writer
 var write bool
 var filename string = "packets.pcap"
+var statistic *tview.TextView
+var tcp, udp, icmp int = 0, 0, 0
 
 func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.TextView, filterChan chan string, statusView *tview.TextView) {
 	go func() {
@@ -77,6 +79,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 				ip, _ := ipLayer.(*layers.IPv4)
 				switch ip.Protocol {
 				case layers.IPProtocolTCP:
+					tcp++
 					tcp, _ := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
 					info := fmt.Sprintf(
 						"\n[lime]%-6s [green]%s:%d -> %s:%d\n[purple]TCP Flags: SYN=%t ACK=%t FIN=%t RST=%t\nSeq: %d Ack: %d Window: %d\nCheckSum: %d Urgent: %d\n[gray]%s",
@@ -96,6 +99,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 					writeLog(app, packetsView, info)
 
 				case layers.IPProtocolUDP:
+					udp++
 					udp, _ := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
 					info := fmt.Sprintf(
 						"\n[yellow]%-6s [green]%s:%d -> %s:%d\n[purple]Length: %d\nChecksum: %d\n[gray]%s",
@@ -106,6 +110,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 					writeLog(app, packetsView, info)
 
 				case layers.IPProtocolICMPv4:
+					icmp++
 					icmp, _ := packet.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4)
 					info := fmt.Sprintf(
 						"\n[red]%-6s [green]%s -> %s\nICMPv4 Type: %d Code: %d\nID: %d Seq: %d\nChecksum: %d\n[gray]%s",
@@ -117,6 +122,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Tex
 					)
 					writeLog(app, packetsView, info)
 				}
+				updateStatistic()
 			}
 		}
 	}
@@ -195,6 +201,13 @@ func savePacketsToFile() *pcapgo.Writer {
 		log.Fatal(err)
 	}
 	return pcapgoWriter
+}
+
+func updateStatistic() {
+	statistic.SetText(fmt.Sprintf(
+		"[lime]TCP: %d [yellow]UDP: %d [red]ICMP: %d",
+		tcp, udp, icmp,
+	))
 }
 
 func main() {
@@ -316,19 +329,26 @@ func main() {
 
 	StyleButton(saveButton)
 
+	statistic = tview.NewTextView()
+	statistic.SetDynamicColors(true)
+	statistic.SetTextAlign(tview.AlignCenter)
+	statistic.SetBorder(true)
+	statistic.SetTitle("Statistics")
+
 	commandsView := tview.NewFlex()
 	commandsView.SetDirection(tview.FlexRow)
 	commandsView.AddItem(payloadButton, 3, 1, true)
 	commandsView.AddItem(pauseButton, 3, 1, true)
 	commandsView.AddItem(saveButton, 3, 1, true)
 	commandsView.AddItem(quitButton, 3, 1, true)
+	commandsView.AddItem(statistic, 3, 0, false)
 
 	commandsView.SetBorder(true)
 	commandsView.SetTitle("Commands")
 
 	rightPane := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(commandsView, 0, 1, false).
-		AddItem(devView, 13, 0, false)
+		AddItem(devView, 10, 0, false)
 
 	bottomLeft := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(filterForm, 0, 1, true).
