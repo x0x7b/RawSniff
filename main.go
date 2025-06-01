@@ -30,6 +30,8 @@ var tcpCounter, udpCounter, icmpCounter int = 0, 0, 0
 var info []string
 var packets [][]string
 var packetsperSecond int = 0
+var ipList = make(map[string]int)
+var rating *tview.TextView
 
 func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.List, filterChan chan string, statusView *tview.TextView) {
 	go func() {
@@ -62,6 +64,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Lis
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 
 	for packet := range packetSource.Packets() {
+
 		info = make([]string, 3)
 		if !paused {
 			if write {
@@ -81,24 +84,40 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Lis
 			filterForm.GetFormItemByLabel("Filter").(*tview.InputField).SetFieldWidth(width / 2)
 			if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
 				ip, _ := ipLayer.(*layers.IPv4)
+				if ipList[ip.SrcIP.String()] == 0 {
+					ipList[ip.SrcIP.String()] = 1
+				} else {
+					ipList[ip.SrcIP.String()] += 1
+				}
+				go updateRating(app)
 				switch ip.Protocol {
 				case layers.IPProtocolTCP:
 					tcpCounter++
 					tcp, _ := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
-					info[0] = fmt.Sprintf("%v[lime]%-6s [green]%s:%d -> %s:%d", packet.Metadata().Timestamp.Format("15:04:05.000 "), ip.Protocol, ip.SrcIP, tcp.SrcPort, ip.DstIP, tcp.DstPort)
+					info[0] = fmt.Sprintf("%v[lime]%-6s [green]%s:%d -> %s:%d", packet.Metadata().Timestamp.Format("15:04:05 "), ip.Protocol, ip.SrcIP, tcp.SrcPort, ip.DstIP, tcp.DstPort)
 					info[1] = formatDetailTCP(tcp)
 
 					if appLayer := packet.ApplicationLayer(); appLayer != nil && payloads {
 						payload := appLayer.Payload()
+						if strings.HasPrefix(string(payload), "GET") ||
+							strings.HasPrefix(string(payload), "POST") ||
+							strings.HasPrefix(string(payload), "HEAD") ||
+							strings.HasPrefix(string(payload), "PUT") ||
+							strings.HasPrefix(string(payload), "DELETE") ||
+							strings.HasPrefix(string(payload), "OPTIONS") ||
+							strings.HasPrefix(string(payload), "HTTP/1.1") ||
+							strings.HasPrefix(string(payload), "HTTP/1.0") {
+							info[0] += fmt.Sprintf("%17s", "[purple]HTTP")
+						}
 						if len(payload) > 0 {
-							info[2] = fmt.Sprintf("[blue]Payload:\n%s", hex.Dump(payload))
+							info[2] = fmt.Sprintf("[blue]Payload:\n\n%s", hex.Dump(payload))
 						}
 					}
 
 				case layers.IPProtocolUDP:
 					udpCounter++
 					udp, _ := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
-					info[0] = fmt.Sprintf("%v [yellow]%-6s [green]%s:%d -> %s:%d", packet.Metadata().Timestamp.Format("15:04:05.000 "), ip.Protocol, ip.SrcIP, udp.SrcPort, ip.DstIP, udp.DstPort)
+					info[0] = fmt.Sprintf("%v [yellow]%-6s [green]%s:%d -> %s:%d", packet.Metadata().Timestamp.Format("15:04:05 "), ip.Protocol, ip.SrcIP, udp.SrcPort, ip.DstIP, udp.DstPort)
 					info[1] = fmt.Sprintf(
 						"[blue]Length: %d\nChecksum: %d\n[gray]",
 						udp.Length, udp.Checksum,
@@ -108,7 +127,7 @@ func Capture(handle *pcap.Handle, app *tview.Application, packetsView *tview.Lis
 					icmpCounter++
 					icmp, _ := packet.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4)
 					info = make([]string, 3)
-					info[0] = fmt.Sprintf("%v[red]%-6s [green]%s -> %s", packet.Metadata().Timestamp.Format("15:04:05.000 "), ip.Protocol, ip.SrcIP, ip.DstIP)
+					info[0] = fmt.Sprintf("%v[red]%-6s [green]%s -> %s", packet.Metadata().Timestamp.Format("15:04:05 "), ip.Protocol, ip.SrcIP, ip.DstIP)
 
 					info[1] = fmt.Sprintf(
 						"\nICMPv4 Type: %d Code: %d\nID: %d Seq: %d\nChecksum: %d\n[gray]",
@@ -205,7 +224,7 @@ func savePacketsToFile() *pcapgo.Writer {
 func updateStatistic(app *tview.Application) {
 	app.QueueUpdateDraw(func() {
 		statistic.SetText(fmt.Sprintf(
-			"total packages: %d\n %d/s\n[lime]TCP: %d [yellow]UDP: %d [red]ICMP: %d",
+			"total packages: %d\n %d last secound\n[lime]TCP: %d\n[yellow]UDP: %d\n[red]ICMP: %d",
 			tcpCounter+udpCounter+icmpCounter, packetsperSecond, tcpCounter, udpCounter, icmpCounter,
 		))
 	})
@@ -259,6 +278,16 @@ func formatDetail(detail []string) string {
 		return fmt.Sprintf("%v\n%v\nthere is no payload", detail[0], detail[1])
 	}
 	return fmt.Sprintf("%v\n%v\n[blue]%v", detail[0], detail[1], detail[2])
+}
+
+func updateRating(app *tview.Application) {
+	var blya strings.Builder
+	for k, v := range ipList {
+		blya.WriteString(fmt.Sprintf("%v:%v\n", k, v))
+	}
+	app.QueueUpdateDraw(func() {
+		rating.SetText(blya.String())
+	})
 }
 
 func main() {
@@ -318,8 +347,8 @@ func main() {
 [gray]Author: [yellow]0x7b
 
 [gray]Links:
-[white]https://github.com/x0x7b
-[white]https://t.me/db0x169
+[white]github.com/x0x7b
+[white]t.me/db0x169
 
 [red::]fuck you.`
 	devView.SetText(aboutText)
@@ -364,12 +393,18 @@ func main() {
 	statistic.SetBorder(true)
 	statistic.SetTitle("Statistics")
 
+	rating = tview.NewTextView()
+	rating.SetDynamicColors(true)
+	rating.SetBorder(true)
+	rating.SetTitle("Rating")
+
 	commandsView := tview.NewFlex()
 	commandsView.SetDirection(tview.FlexRow)
 	commandsView.AddItem(pauseButton, 3, 1, true)
 	commandsView.AddItem(saveButton, 3, 1, true)
 	commandsView.AddItem(quitButton, 3, 1, true)
 	commandsView.AddItem(statistic, 10, 0, false)
+	commandsView.AddItem(rating, 10, 1, false)
 
 	commandsView.SetBorder(true)
 	commandsView.SetTitle("Commands")
@@ -396,10 +431,11 @@ func main() {
 		AddItem(bottomLeft, 0, 1, true)
 
 	layout := tview.NewFlex().
-		AddItem(leftPane, 0, 4, false).
+		AddItem(leftPane, 0, 5, false).
 		AddItem(rightPane, 0, 1, true)
 
 	app.SetRoot(layout, true)
+	app.EnableMouse(true)
 
 	app.SetFocus(filterForm.GetFormItemByLabel("Filter"))
 	focusables := []tview.Primitive{
